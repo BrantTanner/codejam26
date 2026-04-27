@@ -2,82 +2,441 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Joel</title>
+  <title>Phaser Popup Ad Template</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-
-  <style type="text/css">
-    html,
-    body {
-      background: transparent;
+  <style>
+    /* Reset defaults so layout behaves consistently inside the iframe. */
+    * {
       margin: 0;
       padding: 0;
-      font-family: sans-serif;
+      box-sizing: border-box;
     }
 
-    #overlay-container {
-      width: 960px;
-      height: 540px;
+    /* Fill the iframe and keep the base transparent so only the ad UI is visible. */
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      font-family: "Trebuchet MS", "Segoe UI", sans-serif;
     }
 
-    /* Your style here... (feel free to remove this example styling) */
-    #skip {
-      display: none; /* Hidden until ad starts */
+    /* Full-screen dimmer that appears when the ad/game starts. */
+    #overlay {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background:
+        radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.15), transparent 30%),
+        radial-gradient(circle at 80% 80%, rgba(255, 0, 120, 0.22), transparent 40%),
+        rgba(0, 0, 0, 0.62);
+      backdrop-filter: blur(2px);
+      z-index: 10;
+    }
+
+    /* Toggled by JS to show the popup when adStarted fires. */
+    #overlay.visible {
+      display: flex;
+    }
+
+    /* Main fake "play now" popup container. */
+    #ad-popup {
+      width: min(94vw, 860px);
+      height: min(92vh, 510px);
+      border: 3px solid #ffd400;
+      border-radius: 16px;
+      overflow: hidden;
+      background: #0f1020;
+      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
+      position: relative;
+      animation: popIn 220ms ease-out;
+    }
+
+    /* Loud header bar to mimic aggressive ad creatives. */
+    #ad-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 14px;
+      background: linear-gradient(90deg, #d80032, #ff5f1f);
+      color: #fff;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      font-weight: 700;
+    }
+
+    /* Small blinking treatment for urgency text. */
+    .blink {
+      animation: blink 650ms steps(2, jump-none) infinite;
+    }
+
+    /* Area that contains Phaser canvas + overlay HUD controls. */
+    #game-frame {
+      width: 100%;
+      height: calc(100% - 52px);
+      position: relative;
+      background: #0a0b17;
+    }
+
+    /* Parent element where Phaser injects the canvas. */
+    #game-root {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Non-interactive overlay row for score/instructions above the game. */
+    #hud {
       position: absolute;
-      bottom: 60px;
-      right: 0;
-      padding: 10px 18px;
-      background: rgba(0, 0, 0, 0.6);
-      border: 1px solid black;
-      border-right-width: 0;
-      font-size: 1.2rem;
-      border-radius: 4px 0 0 4px;
-      color: white;
+      inset: 12px 12px auto 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    /* Shared rounded style for score and control hint labels. */
+    .pill {
+      background: rgba(255, 255, 255, 0.11);
+      border: 1px solid rgba(255, 255, 255, 0.24);
+      color: #fff;
+      padding: 7px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      letter-spacing: 0.4px;
+    }
+
+    /* Skip button starts disabled; game unlock turns it on. */
+    #skip-btn {
+      position: absolute;
+      right: 12px;
+      bottom: 12px;
+      border: 0;
+      border-radius: 10px;
+      padding: 11px 14px;
+      background: #32d454;
+      color: #081006;
+      font-weight: 800;
+      font-size: 13px;
       cursor: pointer;
+      opacity: 0.5;
+      pointer-events: none;
+      transition: transform 120ms ease, opacity 120ms ease;
+      z-index: 3;
+    }
+
+    /* Enabled state is controlled by JS when goal score is reached. */
+    #skip-btn.enabled {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* Small hover feedback once enabled. */
+    #skip-btn.enabled:hover {
+      transform: translateY(-1px) scale(1.02);
+    }
+
+    /* Pulse animation for "Game Demo Unlock" label. */
+    @keyframes blink {
+      50% {
+        opacity: 0.4;
+      }
+    }
+
+    /* Popup entrance animation when overlay first appears. */
+    @keyframes popIn {
+      from {
+        transform: scale(0.94);
+        opacity: 0;
+      }
+      to {
+        transform: scale(1);
+        opacity: 1;
+      }
     }
   </style>
 </head>
-
 <body>
-  <div id="overlay-container">
-    <!-- We've added a sample button. Feel free to remove it: -->
-    <button id="skip">
-      Skip Ad...
-    </button>
+  <!-- Entire ad interface; hidden until parent sends adStarted. -->
+  <div id="overlay">
+    <!-- Dialog-like popup containing ad header, HUD, and Phaser game canvas. -->
+    <div id="ad-popup" role="dialog" aria-label="Play to skip ad">
+      <div id="ad-header">
+        <span class="blink">Game Demo Unlock</span>
+        <span id="objective-text">Collect 12 coins to skip</span>
+      </div>
+      <div id="game-frame">
+        <!-- HTML HUD drawn above the Phaser canvas for easy DOM updates. -->
+        <div id="hud">
+          <div id="score-pill" class="pill">Score: 0 / 12</div>
+          <div class="pill">Move: Arrow Keys / WASD</div>
+        </div>
+        <!-- Phaser mounts its canvas here. -->
+        <div id="game-root"></div>
+        <!-- Final action button; stays disabled until objective is complete. -->
+        <button id="skip-btn" type="button">Claim Reward + Skip Ad</button>
+      </div>
+    </div>
   </div>
 
-  <script type="text/javascript">
-    (function(window, document){
-      // This is how you tell the parent window that the ad was successfully skipped.
-      function adSuccess() {
-        window.top.postMessage({ type: 'success' }, '*');
+  <!-- Phaser runtime (allowed CDN dependency per jam rules). -->
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"></script>
+  <script>
+    // Wrap everything in an IIFE to avoid leaking variables to global scope.
+    (function(window, document) {
+      // Winning condition for unlocking ad dismissal.
+      const GOAL_SCORE = 12;
+
+      // Cached DOM references used throughout the ad lifecycle.
+      const overlay = document.getElementById('overlay');
+      const scorePill = document.getElementById('score-pill');
+      const objectiveText = document.getElementById('objective-text');
+      const skipBtn = document.getElementById('skip-btn');
+
+      // Runtime state flags and the active Phaser instance.
+      let adRunning = false;
+      let score = 0;
+      let canSkip = false;
+      let game = null;
+
+      // Single helper for all messages sent back to the shell.
+      function sendToParent(msg) {
+        window.top.postMessage(msg, '*');
       }
 
-      const skipButton = document.getElementById('skip');
+      // Report that the user successfully dismissed/completed the ad interaction.
+      function adSuccess() {
+        sendToParent({ type: 'success' });
+      }
 
-      // Listen for messages from the game shell
-      window.addEventListener('message', (event) => {
-        if (!event.data || !event.data.type) return;
+      // Report that the user failed to complete the ad interaction.
+      function adFail() {
+        sendToParent({ type: 'fail' });
+      }
 
-        if (event.data.type === 'adStarted') {
-          // Show the skip button when the ad starts
-          skipButton.style.display = 'block';
+      // Keep score HUD text synced with internal score state.
+      function updateUi() {
+        scorePill.textContent = 'Score: ' + score + ' / ' + GOAL_SCORE;
+      }
+
+      // Unlock skip UX exactly once when goal is met.
+      function unlockSkip() {
+        if (canSkip) return;
+        canSkip = true;
+        objectiveText.textContent = 'Reward unlocked. Click skip now!';
+        skipBtn.classList.add('enabled');
+      }
+
+      // Reset all interaction state before each ad/game run.
+      function resetState() {
+        score = 0;
+        canSkip = false;
+        objectiveText.textContent = 'Collect ' + GOAL_SCORE + ' coins to skip';
+        skipBtn.classList.remove('enabled');
+        updateUi();
+      }
+
+      // Destroy existing Phaser instance to avoid duplicated canvases or listeners.
+      function destroyGame() {
+        if (game) {
+          game.destroy(true);
+          game = null;
+        }
+      }
+
+      // Spawn one collectible coin in a random play area location.
+      function spawnCoin(scene, coins) {
+        const x = Phaser.Math.Between(40, 920);
+        const y = Phaser.Math.Between(70, 500);
+        const coin = coins.create(x, y, 'coin');
+        coin.setScale(1 + Math.random() * 0.3);
+      }
+
+      // Build and launch a new Phaser game instance.
+      function startGame() {
+        destroyGame();
+        resetState();
+
+        // Core Phaser config: fixed world size with responsive fit inside popup.
+        const config = {
+          type: Phaser.AUTO,
+          width: 960,
+          height: 540,
+          parent: 'game-root',
+          backgroundColor: '#13162a',
+          physics: {
+            default: 'arcade',
+            arcade: {
+              gravity: { y: 0 },
+              debug: false
+            }
+          },
+          scene: {
+            preload,
+            create,
+            update
+          },
+          scale: {
+            mode: Phaser.Scale.FIT,
+            autoCenter: Phaser.Scale.CENTER_BOTH
+          }
+        };
+
+        game = new Phaser.Game(config);
+
+        // Generate simple textures in-code so no external image assets are needed.
+        function preload() {
+          const g = this.make.graphics({ x: 0, y: 0, add: false });
+
+          // Player texture.
+          g.fillStyle(0x25b1ff, 1);
+          g.fillRoundedRect(0, 0, 36, 36, 9);
+          g.generateTexture('player', 36, 36);
+          g.clear();
+
+          // Coin texture.
+          g.fillStyle(0xffd400, 1);
+          g.fillCircle(12, 12, 12);
+          g.generateTexture('coin', 24, 24);
+          g.clear();
+
+          // Hazard texture.
+          g.fillStyle(0xff4d6d, 1);
+          g.fillRect(0, 0, 18, 18);
+          g.generateTexture('hazard', 18, 18);
+          g.destroy();
         }
 
-        // By default, if the user doesn't "skip" the ad before the video ends,
-        // we call fail to restart. You're welcome to replace this with a survey
-        // or other interaction instead (see examples/survey).
-        if (event.data.type === 'adFinished') {
-          skipButton.style.display = 'none';
-          window.top.postMessage({ type: 'fail' }, '*');
-        }
-      });
+        // Create all entities, input bindings, and overlap handlers.
+        function create() {
+          const scene = this;
+          scene.cameras.main.setBackgroundColor('#0f1224');
 
-      // Your ad overlay code goes here, we've added a simple example below:
-      skipButton.addEventListener('click', () => {
-        skipButton.style.display = 'none';
+          // Player setup with soft movement feel and world bounds.
+          scene.player = scene.physics.add.sprite(120, 270, 'player');
+          scene.player.setCollideWorldBounds(true);
+          scene.player.setDrag(220, 220);
+          scene.player.setMaxVelocity(280, 280);
+
+          // Accept both arrow keys and WASD.
+          scene.cursors = scene.input.keyboard.createCursorKeys();
+          scene.keys = scene.input.keyboard.addKeys('W,A,S,D');
+
+          // Spawn initial collectible field.
+          scene.coins = scene.physics.add.group({ allowGravity: false, immovable: true });
+          for (let i = 0; i < 6; i++) {
+            spawnCoin(scene, scene.coins);
+          }
+
+          // Create moving hazards that punish score on contact.
+          scene.hazards = scene.physics.add.group({ allowGravity: false, immovable: true });
+          for (let i = 0; i < 4; i++) {
+            const h = scene.hazards.create(
+              Phaser.Math.Between(100, 900),
+              Phaser.Math.Between(80, 500),
+              'hazard'
+            );
+            h.vx = Phaser.Math.Between(-170, 170);
+            h.vy = Phaser.Math.Between(-170, 170);
+          }
+
+          // Coin overlap: increase score, unlock skip at goal, otherwise respawn coin.
+          scene.physics.add.overlap(scene.player, scene.coins, (player, coin) => {
+            coin.destroy();
+            score += 1;
+            updateUi();
+            if (score >= GOAL_SCORE) {
+              unlockSkip();
+            } else {
+              spawnCoin(scene, scene.coins);
+            }
+          });
+
+          // Hazard overlap: reduce score and add a quick screen shake hit effect.
+          scene.physics.add.overlap(scene.player, scene.hazards, () => {
+            score = Math.max(0, score - 2);
+            updateUi();
+            scene.cameras.main.shake(110, 0.01);
+          });
+        }
+
+        // Frame update for movement + manual hazard motion and bounce behavior.
+        function update(_, delta) {
+          const speed = 230;
+          let vx = 0;
+          let vy = 0;
+
+          if (this.cursors.left.isDown || this.keys.A.isDown) vx = -speed;
+          else if (this.cursors.right.isDown || this.keys.D.isDown) vx = speed;
+
+          if (this.cursors.up.isDown || this.keys.W.isDown) vy = -speed;
+          else if (this.cursors.down.isDown || this.keys.S.isDown) vy = speed;
+
+          this.player.setVelocity(vx, vy);
+
+          // Move hazards and reflect off simple world margins.
+          this.hazards.children.iterate((h) => {
+            if (!h) return;
+            h.x += h.vx * (delta / 1000);
+            h.y += h.vy * (delta / 1000);
+
+            if (h.x < 10 || h.x > 950) h.vx *= -1;
+            if (h.y < 10 || h.y > 530) h.vy *= -1;
+          });
+        }
+      }
+
+      // Entry point when ad starts: reveal popup, apply video filter, start game.
+      function showOverlayAndStart() {
+        if (adRunning) return;
+        adRunning = true;
+        overlay.classList.add('visible');
+
+        // Optional annoyance effect on the underlying video while game is active.
+        sendToParent({ type: 'setVideoFilter', value: 'blur(1.4px) saturate(1.4)' });
+
+        startGame();
+      }
+
+      // Common teardown path for hiding popup and cleaning visual/video state.
+      function stopOverlay() {
+        overlay.classList.remove('visible');
+        destroyGame();
+        sendToParent({ type: 'setVideoFilter', value: 'none' });
+      }
+
+      // User can only skip after the game objective has been completed.
+      skipBtn.addEventListener('click', () => {
+        if (!canSkip) return;
+        stopOverlay();
         adSuccess();
       });
 
+      // Receive lifecycle events from the jam shell.
+      window.addEventListener('message', (event) => {
+        if (!event.data || !event.data.type) return;
+
+        // Shell tells us the ad/video started; begin overlay experience.
+        if (event.data.type === 'adStarted') {
+          showOverlayAndStart();
+        }
+
+        if (event.data.type === 'adFinished') {
+          // You currently have fail-on-finish disabled for iteration/testing.
+          // Re-enable the block below when you want strict "must complete before end" behavior.
+          // stopOverlay();
+          // if (adRunning) {
+          //   adRunning = false;
+          //   adFail();
+          // }
+        }
+      });
     })(window, document);
   </script>
 </body>
