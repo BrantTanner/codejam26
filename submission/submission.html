@@ -61,13 +61,21 @@
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      padding: 10px 14px;
-      background: linear-gradient(90deg, #d80032, #ff5f1f);
-      color: #fff;
+      padding: 30px 14px;
+      background:#fff;
+      color: #000000;
       font-size: 14px;
       text-transform: uppercase;
       letter-spacing: 0.6px;
       font-weight: 700;
+    }
+
+    #exit-x{
+      height: 30px;
+    }
+    
+    #game-icon{
+      height: 100px;
     }
 
     /* Small blinking treatment for urgency text. */
@@ -168,13 +176,15 @@
     <!-- Dialog-like popup containing ad header, HUD, and Phaser game canvas. -->
     <div id="ad-popup" role="dialog" aria-label="Play to skip ad">
       <div id="ad-header">
-        <span class="blink">Game Demo Unlock</span>
-        <span id="objective-text">Collect 12 coins to skip</span>
+        <img id="exit-x" src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSVvDZ_tVYNU2qBz-9_R4rRu9q2QvHLIdgPbA&s">
+        <img id="game-icon" src="https://img.freepik.com/free-vector/square-sticker-frame-simple-retro-yellow-design-off-white-background-vector_53876-143547.jpg?semt=ais_hybrid&w=740&q=80">
+        <span id="objective-text">Nearly Possible Game</span>
+        <button id="install-btn" type="button">Install</button>
       </div>
       <div id="game-frame">
         <!-- HTML HUD drawn above the Phaser canvas for easy DOM updates. -->
         <div id="hud">
-          <div id="score-pill" class="pill">Score: 0 / 12</div>
+          <div id="score-pill" class="pill">Crossings: 0 / 3</div>
           <div class="pill">Move: Arrow Keys / WASD</div>
         </div>
         <!-- Phaser mounts its canvas here. -->
@@ -191,7 +201,7 @@
     // Wrap everything in an IIFE to avoid leaking variables to global scope.
     (function(window, document) {
       // Winning condition for unlocking ad dismissal.
-      const GOAL_SCORE = 12;
+      const GOAL_CROSSES = 3;
 
       // Cached DOM references used throughout the ad lifecycle.
       const overlay = document.getElementById('overlay');
@@ -201,7 +211,7 @@
 
       // Runtime state flags and the active Phaser instance.
       let adRunning = false;
-      let score = 0;
+      let crossings = 0;
       let canSkip = false;
       let game = null;
 
@@ -220,24 +230,24 @@
         sendToParent({ type: 'fail' });
       }
 
-      // Keep score HUD text synced with internal score state.
+      // Keep the crossings HUD text synced with internal progress state.
       function updateUi() {
-        scorePill.textContent = 'Score: ' + score + ' / ' + GOAL_SCORE;
+        scorePill.textContent = 'Crossings: ' + crossings + ' / ' + GOAL_CROSSES;
       }
 
       // Unlock skip UX exactly once when goal is met.
       function unlockSkip() {
         if (canSkip) return;
         canSkip = true;
-        objectiveText.textContent = 'Reward unlocked. Click skip now!';
+        objectiveText.textContent = 'Route complete. Click skip now!';
         skipBtn.classList.add('enabled');
       }
 
       // Reset all interaction state before each ad/game run.
       function resetState() {
-        score = 0;
+        crossings = 0;
         canSkip = false;
-        objectiveText.textContent = 'Collect ' + GOAL_SCORE + ' coins to skip';
+        objectiveText.textContent = 'Reach the opposite green zone ' + GOAL_CROSSES + ' times to skip';
         skipBtn.classList.remove('enabled');
         updateUi();
       }
@@ -250,12 +260,32 @@
         }
       }
 
-      // Spawn one collectible coin in a random play area location.
-      function spawnCoin(scene, coins) {
-        const x = Phaser.Math.Between(40, 920);
-        const y = Phaser.Math.Between(70, 500);
-        const coin = coins.create(x, y, 'coin');
-        coin.setScale(1 + Math.random() * 0.3);
+      // Create a static zone sprite used for the green checkpoints.
+      function createZone(scene, x, y, width, height) {
+        const zone = scene.physics.add.staticSprite(x, y, 'zone');
+        zone.displayWidth = width;
+        zone.displayHeight = height;
+        zone.refreshBody();
+        return zone;
+      }
+
+      // Put the player back at the current starting green zone.
+      function respawnAtStart(scene) {
+        scene.player.setPosition(scene.startZone.x, scene.startZone.y);
+        scene.player.setVelocity(0, 0);
+      }
+
+      // Swap the start and goal zone positions so the route alternates left/right.
+      function flipRoute(scene) {
+        const startX = scene.startZone.x;
+        const startY = scene.startZone.y;
+
+        scene.startZone.setPosition(scene.goalZone.x, scene.goalZone.y);
+        scene.goalZone.setPosition(startX, startY);
+
+        scene.startZone.refreshBody();
+        scene.goalZone.refreshBody();
+        respawnAtStart(scene);
       }
 
       // Build and launch a new Phaser game instance.
@@ -300,16 +330,20 @@
           g.generateTexture('player', 36, 36);
           g.clear();
 
-          // Coin texture.
-          g.fillStyle(0xffd400, 1);
-          g.fillCircle(12, 12, 12);
-          g.generateTexture('coin', 24, 24);
+          // Green zone texture.
+          g.fillStyle(0x27d15b, 1);
+          g.fillRoundedRect(0, 0, 120, 180, 18);
+          g.lineStyle(6, 0xffffff, 0.55);
+          g.strokeRoundedRect(3, 3, 114, 174, 14);
+          g.generateTexture('zone', 120, 180);
           g.clear();
 
-          // Hazard texture.
-          g.fillStyle(0xff4d6d, 1);
-          g.fillRect(0, 0, 18, 18);
-          g.generateTexture('hazard', 18, 18);
+          // Red hazard texture.
+          g.fillStyle(0xff4d4d, 1);
+          g.fillRect(0, 0, 26, 26);
+          g.lineStyle(3, 0xffffff, 0.45);
+          g.strokeRect(1, 1, 24, 24);
+          g.generateTexture('hazard', 26, 26);
           g.destroy();
         }
 
@@ -319,7 +353,7 @@
           scene.cameras.main.setBackgroundColor('#0f1224');
 
           // Player setup with soft movement feel and world bounds.
-          scene.player = scene.physics.add.sprite(120, 270, 'player');
+          scene.player = scene.physics.add.sprite(150, 270, 'player');
           scene.player.setCollideWorldBounds(true);
           scene.player.setDrag(220, 220);
           scene.player.setMaxVelocity(280, 280);
@@ -328,42 +362,44 @@
           scene.cursors = scene.input.keyboard.createCursorKeys();
           scene.keys = scene.input.keyboard.addKeys('W,A,S,D');
 
-          // Spawn initial collectible field.
-          scene.coins = scene.physics.add.group({ allowGravity: false, immovable: true });
-          for (let i = 0; i < 6; i++) {
-            spawnCoin(scene, scene.coins);
-          }
+          // Create the two green zones that define the route.
+          scene.startZone = createZone(scene, 150, 270, 120, 180);
+          scene.goalZone = createZone(scene, 810, 270, 120, 180);
+          scene.startZone.setTint(0xb0ffb9);
+          scene.goalZone.setTint(0xffffff);
 
-          // Create moving hazards that punish score on contact.
+          // Create moving red-square hazards that reset the player back to the start.
           scene.hazards = scene.physics.add.group({ allowGravity: false, immovable: true });
-          for (let i = 0; i < 4; i++) {
+          for (let i = 0; i < 5; i++) {
             const h = scene.hazards.create(
-              Phaser.Math.Between(100, 900),
-              Phaser.Math.Between(80, 500),
+              Phaser.Math.Between(240, 720),
+              Phaser.Math.Between(90, 450),
               'hazard'
             );
-            h.vx = Phaser.Math.Between(-170, 170);
-            h.vy = Phaser.Math.Between(-170, 170);
+            h.setScale(1 + Math.random() * 0.45);
+            h.vx = Phaser.Math.Between(-220, 220) || 160;
+            h.vy = Phaser.Math.Between(-180, 180) || -140;
           }
 
-          // Coin overlap: increase score, unlock skip at goal, otherwise respawn coin.
-          scene.physics.add.overlap(scene.player, scene.coins, (player, coin) => {
-            coin.destroy();
-            score += 1;
+          // Reaching the goal zone completes one crossing and flips the route.
+          scene.physics.add.overlap(scene.player, scene.goalZone, () => {
+            crossings += 1;
             updateUi();
-            if (score >= GOAL_SCORE) {
+            if (crossings >= GOAL_CROSSES) {
               unlockSkip();
             } else {
-              spawnCoin(scene, scene.coins);
+              flipRoute(scene);
             }
           });
 
-          // Hazard overlap: reduce score and add a quick screen shake hit effect.
+          // Hitting a red square respawns the player at the current starting green zone.
           scene.physics.add.overlap(scene.player, scene.hazards, () => {
-            score = Math.max(0, score - 2);
-            updateUi();
+            respawnAtStart(scene);
             scene.cameras.main.shake(110, 0.01);
           });
+
+          // Begin on the left-side start zone.
+          respawnAtStart(scene);
         }
 
         // Frame update for movement + manual hazard motion and bounce behavior.
@@ -386,8 +422,8 @@
             h.x += h.vx * (delta / 1000);
             h.y += h.vy * (delta / 1000);
 
-            if (h.x < 10 || h.x > 950) h.vx *= -1;
-            if (h.y < 10 || h.y > 530) h.vy *= -1;
+            if (h.x < 60 || h.x > 900) h.vx *= -1;
+            if (h.y < 70 || h.y > 470) h.vy *= -1;
           });
         }
       }
